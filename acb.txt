@@ -231,30 +231,29 @@
           // console.log('Vertices: ', desVertices !== srcVertices);
           // console.log('Content: ', desContent !== srcContent);
 
-          if (desAnnot.type !== 'stamp' && srcAnnot.type !== 'stamp' && (desTitle !== srcTitle
-            || desRect !== srcRect
-            || desStart !== srcStart
-            || desEnd !== srcEnd
-            || desVertices !== srcVertices
-            || desContent !== srcContent)) {
-            diffAnnots.push(desList.get(id));
-          }
-          if (desAnnot.type === 'stamp' && srcAnnot.type === 'stamp' && (desRect !== srcRect
+        if (desAnnot.type !== 'stamp' && srcAnnot.type !== 'stamp' && (desTitle !== srcTitle
+           || desRect !== srcRect
           || desStart !== srcStart
           || desEnd !== srcEnd
           || desVertices !== srcVertices
           || desContent !== srcContent)) {
-            diffAnnots.push(desList.get(id));
-          }
-        } catch (error) {
           diffAnnots.push(desList.get(id));
         }
-      });
-      return diffAnnots.reverse();
-    }
-  tạo nhánh 22222
-    tạo nhanh 1
-    tạo nhánh 33333
-    tạo nhánh 3 tại branch 3
+        if (desAnnot.type === 'stamp' && srcAnnot.type === 'stamp' && (desRect !== srcRect
+         || desStart !== srcStart
+         || desEnd !== srcEnd
+         || desVertices !== srcVertices
+         || desContent !== srcContent)) {
+          diffAnnots.push(desList.get(id));
+        }
+      } catch (error) {
+        diffAnnots.push(desList.get(id));
+      }
+    });
+    return diffAnnots.reverse();
+  }
+tạo nhánh 22222
+  tạo nhanh 1
+  tạo nhánh 33333
 
 
