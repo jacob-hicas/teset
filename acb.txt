@@ -1,0 +1,256 @@
+markupmanager.ts 807
+public async updateAnnotsExc(annots: Annot[], isForceUpdate?: boolean) {
+    Util.logDebug('updateAnnotsExc', annots);
+    let isAddNew = false;
+    const pdfDoc = this.pdfController.pdfViewer.getCurrentPDFDoc();
+    const lst = [];
+    const listAnnotOnAllPage = [];
+    const pageCount = pdfDoc.getPageCount();
+    let isAnnotMutilpage = false;
+    for (let i = 0; i < pageCount; i++) {
+      lst.push(pdfDoc.getPageByIndex(i));
+    }
+    await Promise.all(lst).then((item) => {
+      item.filter((annot) => listAnnotOnAllPage.push(...annot.annots));
+    });
+    if (annots.length > 0) {
+      isAnnotMutilpage = true;
+    }
+    const annotUpdate = annots.map((annot) => {
+      const isUpdate = AnnotsManager.updateAnnotToPdf(
+        this.pdfController,
+        annot,
+        isAnnotMutilpage,
+        listAnnotOnAllPage,
+      );
+      let page = null;
+      if (Number.isInteger(annot.page)) {
+        page = annot.page;
+      } else {
+        page = annot.page?.info.index;
+      }
+      if (!isUpdate && !isForceUpdate) {
+        if (page === this.pdfController.currPage || page !== this.pdfController.currPage) {
+          isAddNew = true;
+        }
+      }
+      isAnnotMutilpage = false;
+      let json: any = annot;
+      try {
+        json = annot.exportToJSON();
+      } catch (error) {
+        // Error
+      }
+      const mk = this.markupService.listMarkupEntities.find(
+        (i) => i.uniqueId === json.name,
+      );
+      if (annot?.info?.measureRatio && annot?.info?.measureUnit) {
+        json.measureRatio = annot.info.measureRatio;
+        json.measureUnit = annot.info.measureUnit;
+      } else if (annot?.info?.title) {
+        const title = JSON.parse(annot.info.title);
+        if (title && title.measureRatio && title.measureUnit) {
+          json.measureRatio = title.measureRatio;
+          json.measureUnit = title.measureUnit;
+        }
+      }
+      return this.convertAnnotData(json, true, mk?.ModelFileId);
+    });
+    if (this.listMarkupUpdate.length) {
+      isAddNew = false;
+    }
+    if (!isAddNew) {
+      const temp = Util.clone(this.listMarkupUpdate);
+      let signoff = null;
+      let hasSignoffUpdate = false;
+
+      annots.forEach((a) => {
+        try {
+          const exData = JSON.parse(a.info.title);
+          if (exData.markupType === 'signoff') {
+            hasSignoffUpdate = true;
+          }
+        } catch (error) {
+          // error
+        }
+      });
+      if (!hasSignoffUpdate) {
+        if (temp) {
+          temp.forEach((mk) => {
+            if (mk.type === MarkupType.Signoff) {
+              hasSignoffUpdate = true;
+            }
+          });
+        }
+      }
+      if (annots.length && !hasSignoffUpdate) {
+        signoff = this.markupService.updateSignoff();
+      }
+      const listNew = annotUpdate.concat(temp);
+      listNew.forEach((mk) => {
+        if (mk.type === MarkupType.Signoff) {
+          let exData = mk.originData.title;
+          try {
+            exData = JSON.parse(mk.originData.title);
+          } catch (error) {
+            // error
+          }
+          if (signoff) {
+            let newExData = null;
+            try {
+              newExData = JSON.parse(signoff.originData.title);
+            } catch (error) {
+              // error
+            }
+            if (newExData && exData) {
+              exData.signoff = newExData.signoff;
+              mk.originData.title = JSON.stringify(exData);
+            }
+          }
+          signoff = null;
+        }
+      });
+      if (signoff) {
+        signoff.modifiedDate = Date.now();
+        listNew.push(signoff);
+      }
+      const { idAnnotEditText } = this.pdfController;
+      let markupEntitiesSelected = this.markupUIService.markupEntitiesSelected$.value || [];
+      // if(markupEntitiesSelected.length === 0 ){
+      //   const markupEntitiesAttachmentSelected = this.markupService.listMarkupEntities$.value
+      //    markupEntitiesAttachmentSelected.find((id: any)=> {
+      //     if(id.uniqueId === annots[0].id){
+      //       markupEntitiesSelected = [id.uniqueId]
+      //     }
+      //    } )
+      // }
+      if (
+        idAnnotEditText !== '' && markupEntitiesSelected.indexOf(idAnnotEditText) === -1
+      ) {
+        markupEntitiesSelected.push(idAnnotEditText);
+      }
+      if (
+        markupEntitiesSelected?.length === 0
+        && this.tempMarkupEntitiesSelected
+        && this.tempMarkupEntitiesSelected?.length !== 0
+      ) {
+        markupEntitiesSelected = this.tempMarkupEntitiesSelected;
+      }
+      const listNewUpdate = []; // nghia_td update Annots
+      if (listNew.length > 0) {
+        for (let i = 0; i < listNew.length; i++) {
+          for (let j = 0; j < markupEntitiesSelected?.length; j++) {
+            if (
+              listNew[i].originData.title.search('"markupType":"signoff"') !== -1 || listNew[i].uniqueId === markupEntitiesSelected[j]
+            ) {
+              listNewUpdate.push(listNew[i]);
+              break;
+            }
+          }
+        }
+      }
+      this.markupService.updateMarkupEntities(
+        listNewUpdate,
+        this.pdfController.viewId,
+      ); // nghia_td listNew =>listNewUpdate
+      // eslint-disable-next-line no-underscore-dangle
+      const _listMarkupEntities: MarkupEntity[] = Util.clone(listNewUpdate); // nghia_td listNew =>listNewUpdate
+      this.markupService.listMarkupEntities.forEach((mk) => {
+        if (!_listMarkupEntities.find((m) => m.uniqueId === mk.uniqueId)) {
+          _listMarkupEntities.push(mk);
+        }
+      });
+      this.markupService.updateListMarkupEntities(_listMarkupEntities);
+      this.listMarkupUpdate = [];
+    } else this.addAnnotExcute(annots);
+  }
+AnnotManager.ts 
+ public static updateAnnotToPdf(pdfController: PdfCommunicator, annot: Annot, checkAddAnnotMultiPage : boolean, listAnnotOnAllPage: any): boolean {
+    let existAnnots = null;
+    if (checkAddAnnotMultiPage) {
+      existAnnots = AnnotsManager.mapAnnotsToPdf.get(pdfController);
+    } else {
+      existAnnots = [...AnnotsManager.mapAnnotsToPdf.get(pdfController), ...listAnnotOnAllPage];
+    }
+    if (!existAnnots) return false;
+    const annotFound = existAnnots.find((p) => p.id === annot.id);
+    if (!annotFound) return false;
+    const indexOf = existAnnots.indexOf(annotFound);
+    existAnnots[indexOf] = annot;
+    return true;
+  }
+
+pdfHelper.ts 
+ public static getDiffAnnotsArray(srcList: Map<string, Annot>, desList: Map<string, Annot>, action: ActionType): Annot[] {
+    function getExceptMap(srcMap: Map<string, Annot>, desMap: Map<string, Annot>) {
+      const srcKeys = [...srcMap.keys()];
+      const desKeys = [...desMap.keys()];
+      const idsAdded = desKeys.filter((key) => !srcKeys.includes(key));
+      return idsAdded.map((id) => desMap.get(id));
+    }
+    if (action === ActionType.Add) {
+      return getExceptMap(srcList, desList);
+    }
+    if (action === ActionType.Remove) {
+      return getExceptMap(desList, srcList);
+    }
+    const desKeys = [...desList.keys()];
+    const diffAnnots = [];
+    desKeys.forEach((id) => {
+      try {
+        const desAnnot = desList.get(id).exportToJSON();
+        const srcAnnot = srcList.get(id).exportToJSON();
+        // const desAnnotJson = JSON.stringify(desAnnot);
+        // const srcAnnotJson = JSON.stringify(srcAnnot);
+        // console.log(desAnnotJson);
+        // console.log(srcAnnotJson);
+        // des
+        const desTitle = desAnnot.title;
+        const desRect = desAnnot.rect;
+        const desStart = desAnnot.start;
+        const desEnd = desAnnot.end;
+        const desVertices = desAnnot.vertices;
+        const desContent = desAnnot.contents;
+        // src
+        const srcTitle = srcAnnot.title;
+        const srcRect = srcAnnot.rect;
+        const srcStart = srcAnnot.start;
+        const srcEnd = srcAnnot.end;
+        const srcVertices = srcAnnot.vertices;
+        const srcContent = srcAnnot.contents;
+
+        // console.log('========================================');
+        // console.log('des: ', desAnnot.title);
+        // console.log('src: ', srcAnnot.title);
+        // console.log('desContent: ', desContent);
+        // console.log('srcContent: ', srcContent);
+        // console.log('Title: ', desTitle !== srcTitle);
+        // console.log('Rect: ', desRect !== srcRect);
+        // console.log('Start: ', desStart !== srcStart);
+        // console.log('End: ', desEnd !== srcEnd);
+        // console.log('Vertices: ', desVertices !== srcVertices);
+        // console.log('Content: ', desContent !== srcContent);
+
+        if (desAnnot.type !== 'stamp' && srcAnnot.type !== 'stamp' && (desTitle !== srcTitle
+           || desRect !== srcRect
+          || desStart !== srcStart
+          || desEnd !== srcEnd
+          || desVertices !== srcVertices
+          || desContent !== srcContent)) {
+          diffAnnots.push(desList.get(id));
+        }
+        if (desAnnot.type === 'stamp' && srcAnnot.type === 'stamp' && (desRect !== srcRect
+         || desStart !== srcStart
+         || desEnd !== srcEnd
+         || desVertices !== srcVertices
+         || desContent !== srcContent)) {
+          diffAnnots.push(desList.get(id));
+        }
+      } catch (error) {
+        diffAnnots.push(desList.get(id));
+      }
+    });
+    return diffAnnots.reverse();
+  }
+
+
